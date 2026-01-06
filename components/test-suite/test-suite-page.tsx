@@ -118,7 +118,7 @@ export function TestSuitePage({onBack}: TestSuitePageProps) {
             </div>
 
             {/* Main Content */}
-            <main className="flex-1 flex flex-col h-full min-w-0 bg-background">
+            <main className="flex-1 flex flex-col h-full min-w-0 min-h-0 bg-background">
                 {!selectedSuite && view === "editor" ? (
                     <div className="flex-1 flex items-center justify-center text-muted-foreground">
                         <div className="text-center">

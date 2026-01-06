@@ -26,13 +26,19 @@ import {
 } from "@/components/ui/alert-dialog"
 import {CheckCircle, HelpCircle, Loader2, Pencil, Play, Plus, Trash2} from "lucide-react"
 import type {TestCase, TestSuite} from "@/lib/test-suite-types"
-// Alte Store Imports entfernt -> Neue API Imports
 import {createTestCaseApi, deleteTestCaseApi, fetchTestSuites, updateTestCaseApi} from "@/lib/api"
 
 interface TestCaseEditorProps {
     suite: TestSuite
     onSuiteUpdated: (suite: TestSuite) => void
     onRunTests: () => void
+}
+
+const parseArticles = (text: string): string[] => {
+    return text
+        .split(/[,\n;]/g)
+        .map((s) => s.trim())
+        .filter(Boolean)
 }
 
 export function TestCaseEditor({suite, onSuiteUpdated, onRunTests}: TestCaseEditorProps) {
@@ -43,7 +49,11 @@ export function TestCaseEditor({suite, onSuiteUpdated, onRunTests}: TestCaseEdit
     // Loading State für API Operationen
     const [isSubmitting, setIsSubmitting] = React.useState(false)
 
-    const [formData, setFormData] = React.useState({question: "", expectedAnswer: ""})
+    const [formData, setFormData] = React.useState({
+        question: "",
+        expectedAnswer: "",
+        expectedArticlesText: "",
+    })
 
     // Lädt die aktuelle Suite neu vom Server
     const refreshSuite = async () => {
@@ -61,9 +71,15 @@ export function TestCaseEditor({suite, onSuiteUpdated, onRunTests}: TestCaseEdit
 
         setIsSubmitting(true)
         try {
-            await createTestCaseApi(suite.id, formData.question.trim(), formData.expectedAnswer.trim())
+            // ✅ expectedArticles mitsenden (nur wenn vorhanden)
+            await createTestCaseApi(suite.id, {
+                question: formData.question.trim(),
+                expectedAnswer: formData.expectedAnswer.trim(),
+                expectedArticles: parseArticles(formData.expectedArticlesText),
+            })
+
             await refreshSuite()
-            setFormData({question: "", expectedAnswer: ""})
+            setFormData({question: "", expectedAnswer: "", expectedArticlesText: ""})
             setIsAddOpen(false)
         } catch (error) {
             console.error(error)
@@ -81,10 +97,12 @@ export function TestCaseEditor({suite, onSuiteUpdated, onRunTests}: TestCaseEdit
             await updateTestCaseApi(editingCase.id, {
                 question: formData.question.trim(),
                 expectedAnswer: formData.expectedAnswer.trim(),
+                expectedArticles: parseArticles(formData.expectedArticlesText),
             })
+
             await refreshSuite()
             setEditingCase(null)
-            setFormData({question: "", expectedAnswer: ""})
+            setFormData({question: "", expectedAnswer: "", expectedArticlesText: ""})
         } catch (error) {
             console.error(error)
             alert("Fehler beim Aktualisieren")
@@ -110,7 +128,11 @@ export function TestCaseEditor({suite, onSuiteUpdated, onRunTests}: TestCaseEdit
     }
 
     const openEditDialog = (testCase: TestCase) => {
-        setFormData({question: testCase.question, expectedAnswer: testCase.expectedAnswer})
+        setFormData({
+            question: testCase.question,
+            expectedAnswer: testCase.expectedAnswer,
+            expectedArticlesText: (testCase.expectedArticles ?? []).join(", "),
+        })
         setEditingCase(testCase)
     }
 
@@ -165,17 +187,38 @@ export function TestCaseEditor({suite, onSuiteUpdated, onRunTests}: TestCaseEdit
                                             </div>
                                             <p className="text-sm">{testCase.question}</p>
                                         </div>
+
                                         <div>
                                             <div className="flex items-center gap-2 mb-1">
                                                 <CheckCircle className="h-3 w-3 text-green-500"/>
                                                 <span className="text-xs text-muted-foreground">Erwartete Antwort</span>
                                             </div>
-                                            <p className="text-sm text-muted-foreground bg-muted/50 rounded p-2">{testCase.expectedAnswer}</p>
+                                            <p className="text-sm text-muted-foreground bg-muted/50 rounded p-2">
+                                                {testCase.expectedAnswer}
+                                            </p>
                                         </div>
+
+                                        {/* ✅ Nur Anzeige (kein globales Form-Field in der Liste) */}
+                                        {testCase.expectedArticles && testCase.expectedArticles.length > 0 ? (
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <span
+                                                        className="text-xs text-muted-foreground">Erwartete Artikel</span>
+                                                </div>
+                                                <p className="text-sm text-muted-foreground bg-muted/50 rounded p-2">
+                                                    {testCase.expectedArticles.join(", ")}
+                                                </p>
+                                            </div>
+                                        ) : null}
                                     </div>
+
                                     <div className="flex items-center gap-1">
-                                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0"
-                                                onClick={() => openEditDialog(testCase)}>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-8 w-8 p-0"
+                                            onClick={() => openEditDialog(testCase)}
+                                        >
                                             <Pencil className="h-4 w-4"/>
                                         </Button>
                                         <Button
@@ -213,6 +256,7 @@ export function TestCaseEditor({suite, onSuiteUpdated, onRunTests}: TestCaseEdit
                                 disabled={isSubmitting}
                             />
                         </div>
+
                         <div className="grid gap-2">
                             <Label htmlFor="expectedAnswer">Erwartete Antwort</Label>
                             <Textarea
@@ -224,13 +268,28 @@ export function TestCaseEditor({suite, onSuiteUpdated, onRunTests}: TestCaseEdit
                                 disabled={isSubmitting}
                             />
                         </div>
+
+                        {/* ✅ neu: expectedArticles Eingabe */}
+                        <div className="grid gap-2">
+                            <Label htmlFor="expectedArticles">Erwartete Artikel (optional)</Label>
+                            <Textarea
+                                id="expectedArticles"
+                                value={formData.expectedArticlesText}
+                                onChange={(e) => setFormData({...formData, expectedArticlesText: e.target.value})}
+                                placeholder='z.B. "259a, 259d" oder je Zeile ein Artikel'
+                                rows={2}
+                                disabled={isSubmitting}
+                            />
+                        </div>
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setIsAddOpen(false)} disabled={isSubmitting}>
                             Abbrechen
                         </Button>
-                        <Button onClick={handleAdd}
-                                disabled={!formData.question.trim() || !formData.expectedAnswer.trim() || isSubmitting}>
+                        <Button
+                            onClick={handleAdd}
+                            disabled={!formData.question.trim() || !formData.expectedAnswer.trim() || isSubmitting}
+                        >
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin"/>}
                             Hinzufügen
                         </Button>
@@ -255,6 +314,7 @@ export function TestCaseEditor({suite, onSuiteUpdated, onRunTests}: TestCaseEdit
                                 disabled={isSubmitting}
                             />
                         </div>
+
                         <div className="grid gap-2">
                             <Label htmlFor="edit-expectedAnswer">Erwartete Antwort</Label>
                             <Textarea
@@ -265,13 +325,27 @@ export function TestCaseEditor({suite, onSuiteUpdated, onRunTests}: TestCaseEdit
                                 disabled={isSubmitting}
                             />
                         </div>
+
+                        {/* ✅ neu: expectedArticles Eingabe */}
+                        <div className="grid gap-2">
+                            <Label htmlFor="edit-expectedArticles">Erwartete Artikel (optional)</Label>
+                            <Textarea
+                                id="edit-expectedArticles"
+                                value={formData.expectedArticlesText}
+                                onChange={(e) => setFormData({...formData, expectedArticlesText: e.target.value})}
+                                rows={2}
+                                disabled={isSubmitting}
+                            />
+                        </div>
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setEditingCase(null)} disabled={isSubmitting}>
                             Abbrechen
                         </Button>
-                        <Button onClick={handleUpdate}
-                                disabled={!formData.question.trim() || !formData.expectedAnswer.trim() || isSubmitting}>
+                        <Button
+                            onClick={handleUpdate}
+                            disabled={!formData.question.trim() || !formData.expectedAnswer.trim() || isSubmitting}
+                        >
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin"/>}
                             Speichern
                         </Button>
@@ -292,10 +366,10 @@ export function TestCaseEditor({suite, onSuiteUpdated, onRunTests}: TestCaseEdit
                         <AlertDialogCancel disabled={isSubmitting}>Abbrechen</AlertDialogCancel>
                         <AlertDialogAction
                             onClick={(e) => {
-                                e.preventDefault() // Verhindert schließen vor API Call
+                                e.preventDefault()
                                 handleDelete()
                             }}
-                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            className="bg-destructive hover:bg-destructive/80"
                             disabled={isSubmitting}
                         >
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin"/>}

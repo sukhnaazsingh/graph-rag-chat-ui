@@ -5,6 +5,7 @@ export interface TestCase {
     question: string
     expectedAnswer: string
     createdAt: string
+    expectedArticles?: string[]
 }
 
 export interface TestSuite {
@@ -24,6 +25,9 @@ export interface TestCaseResult {
     passed: boolean | null // null = nicht validiert, true = bestanden, false = nicht bestanden
     similarity?: number // Optional: Ähnlichkeitsscore
     explanation?: string
+    retrievedArticles?: string[] // Z.B. ["Art. 259a", "Art. 259d"]
+    expectedArticles?: string[]  // Z.B. ["Art. 257g", "Art. 258"]
+    recall: number
 }
 
 export interface TestRun {
@@ -40,3 +44,4 @@ export interface TestRun {
     completedAt?: string
     passRate: number // Prozentsatz der bestandenen Tests
 }
+

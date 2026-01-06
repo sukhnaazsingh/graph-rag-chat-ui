@@ -33,26 +33,42 @@ export function ChatArea({
     const [input, setInput] = React.useState("")
     const [isThinking, setIsThinking] = React.useState(false)
     const [messages, setMessages] = React.useState<Message[]>([])
+
+    // Lokaler State für die aktive Session ID
     const [sessionId, setSessionId] = React.useState<string | undefined>(initialSessionId)
-    const [strategy, setStrategy] = React.useState("rule-based-strategy")
+    const [strategy, setStrategy] = React.useState("fast-to-g")
     const [isLoadingHistory, setIsLoadingHistory] = React.useState(false)
     const [isMounted, setIsMounted] = React.useState(false)
 
-    // Refs
+    // WICHTIG: Ref um zu tracken, ob wir die Session gerade selbst erstellt haben.
+    // Das verhindert, dass der useEffect die History neu lädt und unseren lokalen State überschreibt.
+    const justCreatedSessionId = React.useRef<string | null>(null)
+
     const scrollRef = React.useRef<HTMLDivElement>(null)
 
     React.useEffect(() => setIsMounted(true), [])
 
+    // Synchronisation mit Parent-Prop (initialSessionId)
     React.useEffect(() => {
         const loadHistory = async () => {
             if (initialSessionId) {
+                // FALL 1: Wir haben diese Session gerade selbst durch eine Nachricht erstellt.
+                // Wir laden NICHT neu, da wir die Nachrichten schon im State haben (Optimistic UI).
+                if (justCreatedSessionId.current === initialSessionId) {
+                    setSessionId(initialSessionId) // State synchronisieren
+                    justCreatedSessionId.current = null // Flag resetten
+                    return
+                }
+
+                // FALL 2: Benutzer hat eine Session aus der Sidebar ausgewählt.
+                // Wir laden die History vom Server.
                 setIsLoadingHistory(true)
                 setSessionId(initialSessionId)
                 try {
                     const data = await fetchSessionHistory(initialSessionId)
                     if (data.messages) {
                         const formattedMessages = data.messages.map((msg: any) => ({
-                            id: msg.id,
+                            id: msg.id || Date.now() + Math.random(), // Fallback ID falls Backend keine liefert
                             role: msg.role,
                             content: msg.content,
                             timestamp: new Date(msg.timestamp).toLocaleTimeString([], {
@@ -64,18 +80,24 @@ export function ChatArea({
                     }
                 } catch (error) {
                     console.error("Failed to load history:", error)
+                    setMessages([]) // Bei Fehler leeren, statt alte Nachrichten zu zeigen
                 } finally {
                     setIsLoadingHistory(false)
                 }
             } else {
+                // FALL 3: Neuer Chat (initialSessionId ist undefined)
+                // Alles zurücksetzen.
                 setSessionId(undefined)
                 setMessages([])
+                setIsThinking(false)
+                setInput("")
+                justCreatedSessionId.current = null
             }
         }
         loadHistory()
     }, [initialSessionId])
 
-    // Autoscroll mit Timeout
+    // Autoscroll
     React.useEffect(() => {
         const timeoutId = setTimeout(() => {
             if (scrollRef.current) {
@@ -87,34 +109,49 @@ export function ChatArea({
 
     const handleSend = async () => {
         if (!input.trim()) return
-        const txt = input;
-        setInput("");
-        setIsThinking(true);
 
-        setMessages(p => [...p, {
+        const currentInput = input
+        setInput("")
+        setIsThinking(true)
+
+        // Optimistic UI Update: Nachricht sofort anzeigen
+        setMessages(prev => [...prev, {
             id: Date.now(),
             role: 'user',
-            content: txt,
+            content: currentInput,
             timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})
         }])
 
         try {
-            const res = await sendChatMessage(txt, strategy, sessionId)
+            // Nutze die lokale sessionId Variable, nicht den State direkt im Request (Closure-Safety)
+            const currentSessionId = sessionId;
+
+            const res = await sendChatMessage(currentInput, strategy, currentSessionId)
+
             if (res.sessionId) {
+                // Wenn es eine neue Session ist oder sich die ID ändert:
+                if (currentSessionId !== res.sessionId) {
+                    // 1. Markieren, dass WIR diese ID erstellt haben
+                    justCreatedSessionId.current = res.sessionId
+                    // 2. Parent informieren (löst Re-Render mit neuer Prop aus)
+                    onSessionCreated?.(res.sessionId)
+                }
+                // 3. Lokalen State updaten
                 setSessionId(res.sessionId)
-                if (sessionId !== res.sessionId) onSessionCreated?.(res.sessionId)
             }
-            setMessages(p => [...p, {
+
+            setMessages(prev => [...prev, {
                 id: Date.now() + 1,
                 role: 'assistant',
                 content: res.answer,
                 timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})
             }])
         } catch (e) {
-            setMessages(p => [...p, {
+            console.error(e)
+            setMessages(prev => [...prev, {
                 id: Date.now() + 2,
                 role: 'assistant',
-                content: "Error connecting to backend.",
+                content: "Error: Could not connect to the backend.",
                 timestamp: 'Now'
             }])
         } finally {
@@ -125,10 +162,8 @@ export function ChatArea({
     if (!isMounted) return <div className="h-full w-full bg-background"/>
 
     return (
-        // WICHTIG: h-full erzwingt die volle Höhe des Parents (main)
         <div className="flex flex-col h-full w-full bg-background">
-
-            {/* 1. Header: flex-none damit er nicht schrumpft */}
+            {/* Header */}
             <header
                 className="flex-none h-14 flex items-center justify-between border-b px-4 bg-background/95 backdrop-blur z-10">
                 <div className="flex items-center gap-2">
@@ -137,8 +172,11 @@ export function ChatArea({
                             <SelectValue placeholder="Select Strategy"/>
                         </SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="rule-based-strategy">Rule Based</SelectItem>
-                            <SelectItem value="llm-strategy">LLM Based</SelectItem>
+                            <SelectItem value="rule-based">Rule Based</SelectItem>
+                            <SelectItem value="llm-based-simple">LLM Based Simple</SelectItem>
+                            <SelectItem value="llm-neurosymbolic">LLM Neuro Symbolic</SelectItem>
+                            <SelectItem value="concept-template">Template Based</SelectItem>
+                            <SelectItem value="fast-to-g">Fast To G</SelectItem>
                         </SelectContent>
                     </Select>
                     <div
@@ -160,7 +198,7 @@ export function ChatArea({
                 </div>
             </header>
 
-            {/* 2. Messages: flex-1 nimmt RESTLICHEN Platz. min-h-0 erlaubt Schrumpfen -> Scrollbar erscheint! */}
+            {/* Messages Area */}
             <div className="flex-1 min-h-0 w-full">
                 <ScrollArea className="h-full w-full p-4">
                     <div className="max-w-3xl mx-auto flex flex-col gap-6 py-4">
@@ -171,7 +209,11 @@ export function ChatArea({
                         )}
 
                         {!isLoadingHistory && messages.length === 0 && (
-                            <div className="text-center text-muted-foreground mt-10">Start asking questions...</div>
+                            <div
+                                className="flex flex-col items-center justify-center h-[50vh] text-muted-foreground gap-2">
+                                <Sparkles className="h-8 w-8 text-muted-foreground/50"/>
+                                <p>Start a new conversation...</p>
+                            </div>
                         )}
 
                         {!isLoadingHistory && messages.map((m) => (
@@ -179,7 +221,7 @@ export function ChatArea({
                                  className={cn("flex gap-4 w-full", m.role === "user" ? "justify-end" : "justify-start")}>
                                 {m.role === "assistant" && (
                                     <div
-                                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
                                         <Bot className="h-5 w-5"/>
                                     </div>
                                 )}
@@ -189,7 +231,8 @@ export function ChatArea({
                                         m.role === "user" ? "bg-primary text-primary-foreground rounded-tr-sm" : "bg-muted text-foreground rounded-tl-sm")}>
                                         {m.content}
                                     </div>
-                                    <span className="text-[10px] text-muted-foreground px-1">{m.timestamp}</span>
+                                    <span
+                                        className="text-[10px] text-muted-foreground px-1 opacity-70">{m.timestamp}</span>
                                 </div>
                                 {m.role === "user" && (
                                     <div
@@ -200,24 +243,32 @@ export function ChatArea({
                             </div>
                         ))}
 
-                        {isThinking && <div className="text-xs text-muted-foreground ml-10 flex items-center gap-2">
-                            <Loader2 className="h-3 w-3 animate-spin"/> Thinking...
-                        </div>}
+                        {isThinking && (
+                            <div className="flex gap-4 w-full justify-start">
+                                <div
+                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                                    <Bot className="h-5 w-5"/>
+                                </div>
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground h-8">
+                                    <Loader2 className="h-3 w-3 animate-spin"/> Thinking...
+                                </div>
+                            </div>
+                        )}
 
-                        {/* Scroll Anchor */}
                         <div ref={scrollRef}/>
                     </div>
                 </ScrollArea>
             </div>
 
-            {/* 3. Input: flex-none bleibt unten kleben */}
+            {/* Input Area */}
             <div className="flex-none p-4 bg-background border-t z-10">
-                <div className="mx-auto max-w-3xl relative rounded-xl border bg-muted/30">
+                <div
+                    className="mx-auto max-w-3xl relative rounded-xl border bg-muted/30 focus-within:ring-1 focus-within:ring-ring focus-within:border-primary/50 transition-all">
                     <Textarea
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
-                        placeholder="Ask..."
-                        className="min-h-[60px] w-full resize-none border-0 bg-transparent p-4 focus-visible:ring-0"
+                        placeholder="Ask anything..."
+                        className="min-h-[60px] w-full resize-none border-0 bg-transparent p-4 focus-visible:ring-0 shadow-none"
                         onKeyDown={(e) => {
                             if (e.key === "Enter" && !e.shiftKey) {
                                 e.preventDefault();
@@ -226,8 +277,14 @@ export function ChatArea({
                         }}
                     />
                     <div className="flex justify-end p-2">
-                        <Button size="sm" onClick={handleSend} disabled={!input.trim()}><Send
-                            className="h-4 w-4"/></Button>
+                        <Button
+                            size="sm"
+                            onClick={handleSend}
+                            disabled={!input.trim() || isThinking}
+                            className={cn("transition-all", input.trim() ? "opacity-100" : "opacity-50")}
+                        >
+                            <Send className="h-4 w-4"/>
+                        </Button>
                     </div>
                 </div>
             </div>

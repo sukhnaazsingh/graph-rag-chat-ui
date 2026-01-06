@@ -139,18 +139,23 @@ export async function deleteTestSuiteApi(id: string): Promise<void> {
 
 // === TEST CASE API ===
 
-export async function createTestCaseApi(suiteId: string, question: string, expectedAnswer: string): Promise<TestCase> {
-    // Dank CamelModel im Backend können wir expectedAnswer (camelCase) senden
+export async function createTestCaseApi(
+    suiteId: string,
+    data: { question: string; expectedAnswer: string; expectedArticles?: string[] }
+): Promise<TestCase> {
     const res = await fetch(`${API_BASE_URL}/test-suites/${suiteId}/cases`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, expectedAnswer }),
+        body: JSON.stringify(data),
     })
     if (!res.ok) throw new Error("Failed to add test case")
     return res.json()
 }
 
-export async function updateTestCaseApi(caseId: string, data: { question: string, expectedAnswer: string }): Promise<TestCase> {
+export async function updateTestCaseApi(
+    caseId: string,
+    data: { question: string; expectedAnswer: string; expectedArticles?: string[] }
+): Promise<TestCase> {
     const res = await fetch(`${API_BASE_URL}/test-cases/${caseId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -206,18 +211,33 @@ export async function updateTestRunResultApi(
     runId: string,
     testCaseId: string,
     actualAnswer: string,
-    passed: boolean,
-    explanation?: string
-): Promise<void> {
-    await fetch(`${API_BASE_URL}/test-runs/${runId}/results/${testCaseId}`, {
+    passed: boolean | null,
+    explanation?: string,
+    similarity?: number,
+    retrievedArticles?: string[],  // <--- Hier kommen sie als CamelCase rein
+    expectedArticles?: string[],
+    llmExtractedArticles?: string[]
+) {
+    const response = await fetch(`${API_BASE_URL}/test-runs/${runId}/results/${testCaseId}`, {
         method: "PUT",
-        headers: {"Content-Type": "application/json"},
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             actual_answer: actualAnswer,
-            passed,
-            explanation
+            passed: passed,
+            explanation: explanation,
+            similarity: similarity,
+
+            // --- HIER IST DER FIX ---
+            // Links: snake_case (für Python) | Rechts: variable (CamelCase)
+            retrieved_articles: retrievedArticles,
+            expected_articles: expectedArticles,
+            llm_extracted_articles: llmExtractedArticles
+            // ------------------------
         }),
-    })
+    });
+
+    if (!response.ok) throw new Error("Failed to update result");
+    return await response.json();
 }
 
 export async function updateTestRunApi(runId: string, updates: Partial<TestRun>): Promise<TestRun> {
@@ -242,14 +262,14 @@ export async function updateTestRunApi(runId: string, updates: Partial<TestRun>)
 
 // === TEST EXECUTION API ===
 
-export async function runTestQuestion(question: string, strategy: string): Promise<{ answer: string }> {
+export async function runTestQuestion(
+    question: string,
+    strategy: string
+): Promise<{ answer: string; retrievedArticles?: string[], llmExtractedArticles?: string[] }> {
     const res = await fetch(`${API_BASE_URL}/predict`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            message: question,
-            strategy: strategy
-        }),
+        body: JSON.stringify({ message: question, strategy }),
     })
 
     if (!res.ok) {

@@ -65,7 +65,7 @@ export function TestRunHistory({suiteId, onSelectRun, selectedRunId, refreshKey}
             runs.filter((r) => r.isFavorite).sort((a, b) => (a.favoriteOrder || 0) - (b.favoriteOrder || 0)),
         [runs])
 
-    const recentRuns = runs.slice(0, 20)
+    const recentRuns = runs.slice(0, 1000)
 
     const handleDelete = async (runId: string) => {
         if (confirm("Möchten Sie diesen Run wirklich löschen?")) {
@@ -220,7 +220,7 @@ export function TestRunHistory({suiteId, onSelectRun, selectedRunId, refreshKey}
                   {formatDate(run.startedAt)}
               </span>
                             <Badge variant="outline" className="text-[10px] h-5">
-                                {run.strategy === "llm-strategy" ? "LLM" : "Rule"}
+                                {run.strategy}
                             </Badge>
                         </div>
                         <div className="flex items-center gap-3 mt-2">
